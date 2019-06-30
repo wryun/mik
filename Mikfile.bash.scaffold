@@ -1,0 +1,98 @@
+# mik_global_help:
+#   This is an auto-generated Mikfile (from `mik scaffold`). Customise away!
+#
+# mik is a tool to wrap up a bundle of mini-shell scripts in a single file,
+# inspired by Make and multi-function CLI applications like git.
+#
+# For more about mik, or to download it, see: https://wryun.github.io/mik/
+
+# Mikfiles are (almost) just bash scripts. So, let's set some good defaults.
+set -o errexit   # terminate with failure if any command returns an error
+set -o nounset   # terminate with failure if you refer to an unset variable
+set -o pipefail  # cause error return value if any of a pipeline has failed
+set -o errtrace  # inherit any error traps
+set -o noclobber # don't allow '>' type redirects to overwrite (use >| etc.)
+
+# In fact, everything in a Mikfile is syntactically acceptable to bash, and
+# Mikfiles are run by passing the entire file to bash with a small amount
+# of special sauce. This special sauce is controlled by 'mik_' prefixed things.
+# For example, the following line tells mik to accept the '--verbose' argument
+# and set MARG_VERBOSE to true if the user provides it (false if not):
+#
+# mik_global_args: --verbose
+
+# Here is an example of a mik command, which is written as a shell function.
+# It's somewhat similar in usage to a Makefile target. You can run this command
+# by executing the following from your shell:
+#
+#   mik hello --verbose
+#
+# mik_help: Says hello to the world
+mik_hello() {
+  # Here we use the value set for verbose (which comes from the mik_common_args
+  # definition above).
+  if [ "$MARG_VERBOSE" = true ]; then
+    echo Hello, world!
+  else
+    echo hello
+  fi
+}
+
+# We can also specify arguments for a particular command only, which will also
+# be assigned to the environment variables MARG_<argname>. In this case, we
+# have an argument that takes a value, and this value defaults to 'world'. If
+# '=world' wasn't provided (i.e. <> was used), the default value would be an
+# empty string.
+#
+# mik_help: Says hello to a particular entity.
+# mik_args: -n/--name <=world>
+mik_helloname() {
+  if [ "$VERBOSE" = true ]; then
+    echo "Hello, $MARG_NAME! How's it going?"
+  else
+    echo "Hey, $MARG_NAME!"
+  fi
+}
+
+# Here is an example of other kinds of mik argument processing. You'll note
+# that mik_args/mik_help can span multiple lines. The rule is that if the
+# indentation continues (at any level) this is processed as part of preceding
+# definition. However, only the first line is used for the general mik help
+# (subsequent lines are shown for mik help <commandname>).
+#
+# mik_help:
+#  Demonstrate the arguments.
+#
+#  Sometimes it's good to elucidate.
+#
+# mik_args: -n/--never/--numpty <>
+#           -s/--sometimes <=val>
+#           --complex-default <=val>
+#           positional ...
+#
+mik_showargs() {
+  echo "n is '$MARG_N' and also '$MARG_NEVER' and '$MARG_NUMPTY'"
+  echo "s is '$MARG_N' and also '$MARG_SOMETIMES'"
+  echo "positional is '$MARG_N'"
+  echo "we have $# remaining positional args"
+  echo "they are $@"
+}
+
+# Note that you're free to do other things here, including define normal
+# functions or even call mik_ functions. This is just a normal bash script!
+#
+# The way that the special sauce is implemented is that:
+#   - environment variables are set based on the arguments
+#   - if "$@" is in mik_args, the remaining arguments are passed to the script
+#   - a single line will be added to the file to run the requested command
+#     (e.g. mik_showargs "$@")
+ANSWER=42
+think() {
+  mik_hello
+  sleep 3 2 1
+}
+
+# If you want mik to behave more like Make and echo the commands it's running,
+# you should uncomment the following line (which again, is just bash...)
+
+#set -o xtrace
