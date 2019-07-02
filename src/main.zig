@@ -120,12 +120,24 @@ pub fn processArgs(allocator: *std.mem.Allocator, command: Command, args_it: *st
     return envMap;
 }
 
+pub fn generate_scaffold() !void {
+    const file = std.fs.File.openWriteNoClobber(MIKFILE, std.fs.File.default_mode) catch |err| switch (err) {
+        std.fs.File.OpenError.PathAlreadyExists => {
+            std.debug.warn("Cowardly refusing to overwrite existing {}\n", MIKFILE);
+            return;
+        },
+        else => return err,
+    };
+    defer file.close();
+    try file.write(MIKFILE_SCAFFOLD);
+}
+
 pub fn main() anyerror!void {
     var direct_allocator = std.heap.DirectAllocator.init();
     defer direct_allocator.deinit();
 
     // using an arena allocator means we don't have to worry about deinit as we go.
-    // tbh, it's all kinda a waste of time anyway, since I think this arena.deinit
+    // tbh, it's all kinda a waste of time anyway, as the arena.deinit
     // will never run on a correct execution (since we're exec-ing ...).
     var arena = std.heap.ArenaAllocator.init(&direct_allocator.allocator);
     defer arena.deinit();
@@ -143,16 +155,7 @@ pub fn main() anyerror!void {
     _ = args_it.skip();
     if (args_it.nextPosix()) |command_name| {
         if (std.mem.eql(u8, command_name, "scaffold")) {
-            const file = std.fs.File.openWriteNoClobber(MIKFILE, std.fs.File.default_mode) catch |err| switch (err) {
-                std.fs.File.OpenError.PathAlreadyExists => {
-                    std.debug.warn("Cowardly refusing to overwrite existing {}\n", MIKFILE);
-                    return;
-                },
-                else => return err,
-            };
-            defer file.close();
-            try file.write(MIKFILE_SCAFFOLD);
-            return;
+            return generate_scaffold();
         }
 
         var input = try std.fs.File.openRead(MIKFILE);
