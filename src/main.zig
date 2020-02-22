@@ -6,16 +6,16 @@ const MIKFILE_SCAFFOLD = @embedFile("../Mikfile.bash.scaffold");
 const CommandError = error{
     NoSuchField,
     FieldDefinedTwice,
+    ExtraArgs,
 };
 
-// TODO allocate space for this...
 const Command = struct {
     allocator: *std.mem.Allocator,
     name: std.Buffer,
     help: std.Buffer,
     args: std.Buffer,
 
-    pub fn init(allocator: *std.mem.Allocator) !Command {
+    fn init(allocator: *std.mem.Allocator) !Command {
         return Command{
             .allocator = allocator,
             .name = try std.Buffer.initSize(allocator, 0),
@@ -24,7 +24,7 @@ const Command = struct {
         };
     }
 
-    pub fn clone(self: *Command) !Command {
+    fn clone(self: *Command) !Command {
         return Command{
             .allocator = self.allocator,
             .name = try std.Buffer.init(self.allocator, self.name.toSliceConst()),
@@ -33,20 +33,20 @@ const Command = struct {
         };
     }
 
-    pub fn reset(self: *Command) !void {
+    fn reset(self: *Command) !void {
         try self.name.resize(0);
         try self.help.resize(0);
         try self.args.resize(0);
     }
 
-    pub fn _setField(self: *Command, buf: *std.Buffer, value: []const u8) !void {
+    fn _setField(self: *Command, buf: *std.Buffer, value: []const u8) !void {
         if (buf.len() != 0) {
             return CommandError.FieldDefinedTwice;
         }
         try buf.replaceContents(value);
     }
 
-    pub fn setField(self: *Command, key: []const u8, value: []const u8) !void {
+    fn setField(self: *Command, key: []const u8, value: []const u8) !void {
         // Is there a tricky way to do this? comptime something something?
         if (std.mem.eql(u8, key, "help")) {
             try self._setField(&self.help, value);
@@ -58,15 +58,44 @@ const Command = struct {
         }
     }
 
-    pub fn showHelp(self: *Command) void {
+    fn showHelp(self: *const Command) void {
         std.debug.warn("  {s10}  {}\n", self.name.toSliceConst(), self.help.toSliceConst());
+    }
+
+    fn showFullHelp(self: *const Command) void {
+        std.debug.warn("mik {} {}", self.name.toSliceConst(), self.args.toSliceConst());
+        std.debug.warn("{}\n", self.help.toSliceConst());
+    }
+
+    fn parseArgString(self: *const Command) !std.hash_map.AutoHashMap([]const u8, Argument) {
+        const args = std.hash_map.AutoHashMap([]const u8, []const []const u8).init(self.allocator);
+        const positionals = 
+        var it = mem.tokenize(self.args, " \t\r\n");
+        while (it.next()) |token| {
+            if (mem.startsWith(u8, token, "-")) {
+            } else if (mem.startsWith(u8, token, "<") and mem.endsWith(u8, token, ">")) {
+                token[1..-1]
+            }
+        }
+
+    }
+
+    fn exec(self: *const Command, tmp_file: []const u8) !void {
+        const argsMap = self.parseArgString();
+        var env = try processArgs(self.allocator, self, &std.process.args());
+        // TODO pass remaining std.process.args
+        try std.os.execve(self.allocator, [_][]const u8{ "bash", tmp_file }, &env);
     }
 };
 
-pub fn processFile(allocator: *std.mem.Allocator, input: *std.io.InStream(std.os.ReadError), output: *std.io.OutStream(std.os.WriteError), command_name: []const u8) !?Command {
+fn processFile(allocator: *std.mem.Allocator, input: *std.io.InStream(std.os.ReadError), output: *std.io.OutStream(std.os.WriteError), command_name: []const u8) !?Command {
     const help_mode = std.mem.eql(u8, command_name, "help");
     var buf = try std.Buffer.initSize(allocator, 1000);
     var current_command = try Command.init(allocator);
+
+    // for amusement's sake (and to use a stupidly small amount of memory), we
+    // don't build a hashmap of all the commands but instead return only
+    // that referenced by command_name.
     var final_command: ?Command = null;
     // TODO smaller static buffer, only read start of line?
     while (std.io.readLineFrom(input, &buf)) |line| {
@@ -74,13 +103,10 @@ pub fn processFile(allocator: *std.mem.Allocator, input: *std.io.InStream(std.os
         try output.write("\n");
 
         if (std.mem.startsWith(u8, line, "mik_") and std.mem.endsWith(u8, line, "() {")) {
-            // TODO need to copy this slice. OTOH, how is it working now???
-            // AH - readLineFrom is just appending to the buffer. Interesting.
             try current_command.name.replaceContents(line[4..std.mem.indexOfScalar(u8, line, '(').?]);
             if (help_mode) {
                 current_command.showHelp();
             } else if (current_command.name.eql(command_name)) {
-                // TODO check if final_command already exists
                 final_command = try current_command.clone();
             }
 
@@ -96,6 +122,8 @@ pub fn processFile(allocator: *std.mem.Allocator, input: *std.io.InStream(std.os
                 };
             }
         }
+
+        try buf.resize(0);
     } else |err| {}
 
     if (final_command) |command| {
@@ -109,7 +137,7 @@ pub fn processFile(allocator: *std.mem.Allocator, input: *std.io.InStream(std.os
     return final_command;
 }
 
-pub fn processArgs(allocator: *std.mem.Allocator, command: Command, args_it: *std.process.ArgIterator) !std.BufMap {
+fn processArgs(allocator: *std.mem.Allocator, command: *const Command, args_it: *std.process.ArgIterator) !std.BufMap {
     var envMap = try std.process.getEnvMap(allocator);
 
     while (args_it.nextPosix()) |arg| {
@@ -120,7 +148,7 @@ pub fn processArgs(allocator: *std.mem.Allocator, command: Command, args_it: *st
     return envMap;
 }
 
-pub fn generate_scaffold() !void {
+fn generate_scaffold() !void {
     const file = std.fs.File.openWriteNoClobber(MIKFILE, std.fs.File.default_mode) catch |err| switch (err) {
         std.fs.File.OpenError.PathAlreadyExists => {
             std.debug.warn("Cowardly refusing to overwrite existing {}\n", MIKFILE);
@@ -145,28 +173,42 @@ pub fn main() anyerror!void {
     const allocator = &arena.allocator;
 
     // TODO generate name randomly... or at least process id suffix
-    const tmpFile = "/tmp/Mikfile.bash";
-    var output = try std.fs.File.openWrite(tmpFile);
-    try output.write("rm " ++ tmpFile ++ "\n");
-    errdefer std.fs.deleteFile(tmpFile) catch {};
+    const tmp_file = "/tmp/Mikfile.bash";
+    var output = try std.fs.File.openWrite(tmp_file);
+    try output.write("rm " ++ tmp_file ++ "\n");
+    errdefer std.fs.deleteFile(tmp_file) catch {};
     defer output.close();
 
     var args_it = std.process.args();
     _ = args_it.skip();
-    if (args_it.nextPosix()) |command_name| {
-        if (std.mem.eql(u8, command_name, "scaffold")) {
-            return generate_scaffold();
+
+    var command_name = args_it.nextPosix() orelse "help";
+    var command_help = false;
+    if (std.mem.eql(u8, command_name, "scaffold")) {
+        if (args_it.skip()) {
+            return CommandError.ExtraArgs;
         }
+        try generate_scaffold();
+    } else if (std.mem.eql(u8, command_name, "help")) {
+        if (args_it.nextPosix()) |arg| {
+            command_help = true;
+            command_name = arg;
+        }
+        if (args_it.skip()) {
+            return CommandError.ExtraArgs;
+        }
+    }
 
-        var input = try std.fs.File.openRead(MIKFILE);
-        defer input.close();
+    var input = try std.fs.File.openRead(MIKFILE);
+    defer input.close();
 
-        var command = try processFile(allocator, &input.inStream().stream, &output.outStream().stream, command_name);
+    var command = try processFile(allocator, &input.inStream().stream, &output.outStream().stream, command_name);
 
-        if (command) |command_val| {
-            var env = try processArgs(allocator, command_val, &std.process.args());
-            // TODO pass remaining std.process.args
-            try std.os.execve(allocator, [_][]const u8{ "bash", tmpFile }, &env);
+    if (command) |command_val| {
+        if (command_help) {
+            command_val.showFullHelp();
+        } else {
+            try command_val.exec(tmp_file);
         }
     }
 }
